@@ -1,5 +1,5 @@
 # AI Knowledge Graph Builder for Enterprise Intelligence
-Infosys Springboard Internship Project
+Infosys Springboard 6.0 Internship Project
 
 ## Milestones
 
