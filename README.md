@@ -430,7 +430,7 @@ Infosys Springboard AI Internship Program
 
 ## 📄 License
 
-This project is licensed under the terms in `license.txt`.
+This project is licensed under the MIT License 
 
 ---
 
