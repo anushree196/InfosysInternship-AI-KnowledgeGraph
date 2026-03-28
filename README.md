@@ -348,13 +348,13 @@ streamlit run app.py
 ## 🖼️ Output Screenshots
 
 ### Dashboard Overview
-![Dashboard Overview](assets/dashboard_overview.png)
+![Dashboard Overview](assets/dashboard_overview.jpeg)
 
 ### Interactive Knowledge Graph — forceAtlas2Based Physics
-![Graph Explorer](assets/graph_explorer.png)
+![Graph Explorer](assets/graph_explorer.jpeg)
 
 ### Node AI Agent — Click any node for instant AI explanation
-![Node AI Agent](assets/node_ai_agent.png)
+![Node AI Agent](assets/node_ai_agent.jpeg)
 
 ### Email Report Received — Scenario 2 (Search Result Report)
 ![Email Search Report](assets/email_search_report.png)
@@ -446,4 +446,4 @@ This project is licensed under the terms in `license.txt`.
 
 ---
 
-*Built with ❤️ for the Infosys Springboard AI Internship Program*
+*Built with ❤️ for the Infosys Springboard 6.0 AI Internship Program*
