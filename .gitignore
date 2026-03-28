@@ -4,3 +4,5 @@ __pycache__/
 .ipynb_checkpoints/
 notebooks/cache/
 faiss_index_langchain/ 
+*_REAL.ipynb
+.streamlit/secrets.toml
