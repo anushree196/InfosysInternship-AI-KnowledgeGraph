@@ -9,10 +9,16 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 import streamlit as st
 
 RAG_PROMPT_TEMPLATE = """You are an intelligent job search assistant for an enterprise knowledge graph.
-Use these retrieved job listings to answer:
+Use ONLY the job listings below that are truly relevant to the question. Ignore listings that do not match.
+Retrieved job listings:
 {context}
 Question: {question}
-Give a helpful 2-3 sentence answer mentioning how many jobs found, key locations and patterns:"""
+Instructions:
+- Count ONLY the jobs from the listings above that directly match the question criteria (category, location, workplace, priority, etc.).
+- Start your answer with "I found X job(s)" where X is the exact count of matching jobs.
+- Then mention key locations and patterns in 2-3 sentences total.
+- Do NOT inflate the count. If only 3 jobs match, say 3."""
+
 
 def get_embeddings(model_name):
     return HuggingFaceEmbeddings(
@@ -20,6 +26,7 @@ def get_embeddings(model_name):
         model_kwargs={"device": "cpu"},
         encode_kwargs={"normalize_embeddings": True}
     )
+
 
 def jobs_to_documents(jobs):
     documents = []
@@ -37,21 +44,25 @@ def jobs_to_documents(jobs):
         documents.append(doc)
     return documents
 
+
 def build_faiss_pipeline(jobs, groq_api_key, embedding_model, llm_model, top_k):
     """Build FAISS RAG pipeline"""
     documents = jobs_to_documents(jobs)
     embeddings_model = get_embeddings(embedding_model)
 
     start = time.time()
-    vectorstore = FAISS.from_documents(documents=documents, embedding=embeddings_model)
+    vectorstore = FAISS.from_documents(
+        documents=documents, embedding=embeddings_model)
     index_time = round((time.time() - start) * 1000, 1)
 
     retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": top_k, "fetch_k": 30}
+        search_type="similarity_score_threshold",
+        search_kwargs={"k": top_k, "score_threshold": 0.3}
     )
-    llm = ChatGroq(groq_api_key=groq_api_key,model_name=llm_model, temperature=0.2, max_tokens=512)
-    RAG_PROMPT = PromptTemplate(input_variables=["context", "question"], template=RAG_PROMPT_TEMPLATE)
+    llm = ChatGroq(groq_api_key=groq_api_key,
+                   model_name=llm_model, temperature=0.2, max_tokens=512)
+    RAG_PROMPT = PromptTemplate(
+        input_variables=["context", "question"], template=RAG_PROMPT_TEMPLATE)
 
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
@@ -62,12 +73,14 @@ def build_faiss_pipeline(jobs, groq_api_key, embedding_model, llm_model, top_k):
     )
     return rag_chain, retriever, index_time
 
+
 def build_pinecone_pipeline(jobs, groq_api_key, pinecone_api_key, index_name, embedding_model, llm_model, top_k):
     """Build Pinecone RAG pipeline"""
     try:
         from pinecone import Pinecone, ServerlessSpec
         from langchain_pinecone import PineconeVectorStore
-        import os, time
+        import os
+        import time
 
         documents = jobs_to_documents(jobs)
         embeddings_model = get_embeddings(embedding_model)
@@ -94,8 +107,10 @@ def build_pinecone_pipeline(jobs, groq_api_key, pinecone_api_key, index_name, em
         index_time = round((time.time() - start) * 1000, 1)
 
         retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
-        llm = ChatGroq(groq_api_key=groq_api_key,model_name=llm_model, temperature=0.2, max_tokens=512)
-        RAG_PROMPT = PromptTemplate(input_variables=["context", "question"], template=RAG_PROMPT_TEMPLATE)
+        llm = ChatGroq(groq_api_key=groq_api_key,
+                       model_name=llm_model, temperature=0.2, max_tokens=512)
+        RAG_PROMPT = PromptTemplate(
+            input_variables=["context", "question"], template=RAG_PROMPT_TEMPLATE)
 
         def format_docs(docs):
             return "\n\n".join(doc.page_content for doc in docs)
@@ -108,14 +123,68 @@ def build_pinecone_pipeline(jobs, groq_api_key, pinecone_api_key, index_name, em
     except Exception as e:
         return None, None, 0
 
+
+def _extract_query_keywords(query):
+    """Pull meaningful filter words from the query (locations, workplace, job type etc.)"""
+    import re
+    # Common stop words to ignore
+    stop = {
+        "show", "me", "find", "get", "list", "give", "search", "jobs", "job",
+        "listings", "listing", "positions", "position", "roles", "role",
+        "in", "at", "for", "the", "a", "an", "and", "or", "with", "that",
+        "are", "is", "of", "to", "from", "on", "by", "all", "any", "some",
+        "data", "scientist", "developer", "engineer", "analyst", "manager",
+        "remote", "hybrid", "onsite", "on-site", "full-time", "part-time",
+        "senior", "junior", "lead", "high", "demand", "premium", "top",
+    }
+    words = re.findall(r'[a-zA-Z]+', query.lower())
+    return [w for w in words if w not in stop and len(w) > 2]
+
+
+def _job_matches_query(job_meta, keywords):
+    """Return True if the job metadata contains at least one query keyword."""
+    if not keywords:
+        return True
+    searchable = " ".join(str(v).lower() for v in job_meta.values())
+    return any(kw in searchable for kw in keywords)
+
+
 def run_search(rag_chain, retriever, query):
-    """Run search and return answer, results, latency"""
+    """Run search, filter results to query keywords, trim to AI-stated count."""
+    import re
+
     start = time.time()
     answer = rag_chain.invoke(query)
     latency = round((time.time() - start) * 1000, 1)
+
     retrieved = retriever.invoke(query)
-    results = [doc.metadata for doc in retrieved]
-    return answer, results, latency
+    all_results = [doc.metadata for doc in retrieved]
+
+    # ── Step 1: filter by query keywords (location, workplace, etc.) ──
+    keywords = _extract_query_keywords(query)
+    filtered = [r for r in all_results if _job_matches_query(r, keywords)]
+    # If filtering removes everything, fall back to unfiltered
+    if not filtered:
+        filtered = all_results
+
+    # ── Step 2: parse the count the LLM stated e.g. "I found 4 remote … jobs" ──
+    match = re.search(
+        r'(?:found|identified|retrieved|there\s+are|showing)\s+(?:\w+\s+){0,5}?(\d+)\b',
+        answer, re.IGNORECASE
+    )
+    if not match:
+        match = re.search(
+            r'(?:found|identified|retrieved|there\s+are|showing)\s+(\d+)',
+            answer, re.IGNORECASE
+        )
+
+    if match:
+        ai_count = int(match.group(1))
+        display_results = filtered[:max(1, min(ai_count, len(filtered)))]
+    else:
+        display_results = filtered
+
+    return answer, display_results, latency
 
 
 NODE_AGENT_PROMPT = """You are an expert AI agent analyzing a knowledge graph node.
@@ -134,11 +203,13 @@ Give a clear, insightful 3-4 sentence explanation of:
 
 Be specific, professional. Do NOT use HTML tags in your response."""
 
+
 def explain_node_with_agent(node_name, node_label, node_details, groq_api_key, llm_model):
     """AI Agent that explains a clicked graph node using Groq LLM"""
     try:
         import time as _time
-        llm = ChatGroq(groq_api_key=groq_api_key,model_name=llm_model, temperature=0.3, max_tokens=400)
+        llm = ChatGroq(groq_api_key=groq_api_key,
+                       model_name=llm_model, temperature=0.3, max_tokens=400)
         prompt = NODE_AGENT_PROMPT.format(
             label=node_label,
             name=node_name,
@@ -151,6 +222,7 @@ def explain_node_with_agent(node_name, node_label, node_details, groq_api_key, l
         return response.content, latency
     except Exception as e:
         return f"Agent error: {str(e)}", 0
+
 
 def send_email_report(
     sendgrid_api_key,
