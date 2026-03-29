@@ -13,7 +13,7 @@ An AI-powered platform that automatically builds dynamic knowledge graphs from e
 enabling intelligent semantic search, RAG-powered Q&A, interactive graph visualization, and automated email reporting.
 
 ## 🌐 Live Demo
-### 🚀 [Click here to explore the live app →](https://aiknowledgegraphbuilderforenterpriseinteligence.streamlit.app/)
+### 🚀 [Click here to explore the live app →](https://aiknowledgegraphbuilderforenterprise.streamlit.app/)
 
 ---
 
